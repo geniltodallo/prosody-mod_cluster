@@ -10,16 +10,19 @@ It keeps a global local list of remote users. When local user send one message, 
 
 Example configuration for 3 clusters:
 
+
+cluster_server_interfaces = { "*" } -- listen on all interfaces
+
 Prosody configuration on cluster1:
-cluster_name = "sv01.yourcluster.com";
+cluster_node_name = "sv01.yourcluster.com";
 cluster_servers = { "sv02.yourcluster.com:7473", "sv03.yourcluster.com:7473"};
 
 Prosody configuration on cluster2:
-cluster_name = "sv02.yourcluster.com";
+cluster_node_name = "sv02.yourcluster.com";
 cluster_servers = { "sv01.yourcluster.com:7473", "sv03.yourcluster.com:7473"};
 
 Prosody configuration on cluster3:
-cluster_name = "sv03.yourcluster.com";
+cluster_node_name = "sv03.yourcluster.com";
 cluster_servers = { "sv01.yourcluster.com:7473", "sv02.yourcluster.com:7473"};
 
 
