@@ -18,9 +18,9 @@ local hosts = prosody.hosts;
 
 local traceback = debug.traceback;
 
-local cluster_name = module:get_option("cluster_name", nil);
-if not cluster_name then
-    error("cluster_name not configured", 0);
+local node_name = module:get_option("cluster_node_name", nil);
+if not node_name then
+    error("cluster_node_name not configured", 0);
 end
 
 local opt_keepalives = module:get_option_boolean("cluster_tcp_keepalives", module:get_option_boolean("tcp_keepalives", true));
@@ -82,8 +82,8 @@ function stream_callbacks.error(session, error, data, data2)
 end
 
 function stream_callbacks.streamopened(session, attr)
-	if attr.to ~= cluster_name then
-		session:close{ condition = "host-unknown", text = "unknown cluster name "..tostring(attr.to) };
+	if attr.to ~= node_name then
+		session:close{ condition = "host-unknown", text = "unknown node name "..tostring(attr.to) };
 		return;
 	end
 	module:log("debug", "Received remote stream_callbacks: %s", attr);
@@ -147,12 +147,12 @@ function sendLocalSessions(remoteServer)
 		
         module:log("debug", "mod_cluster PROBE: Sending local users to remote server:" .. remoteServer);
         --criar um pacote xmpp de sessao do user
-        --<cluster type='available' cluster_from='cluster1.hostx.net' from='gd@hostx.net' xmlns='urn:xmpp:cluster'/>
+        --<cluster type='available' node_from='cluster1.hostx.net' from='gd@hostx.net' xmlns='urn:xmpp:cluster'/>
         userSessionStanza = st.stanza("cluster", { xmlns = 'urn:xmpp:cluster'});
         userSessionStanza.attr.type = "available";
         userSessionStanza.attr.from = jid;
 
-        module:fire_event("cluster/send", { cluster = remoteServer, host = remoteServer, stanza = userSessionStanza });
+        module:fire_event("cluster/send", { node = remoteServer, host = remoteServer, stanza = userSessionStanza });
 
     end
 
@@ -161,22 +161,22 @@ end
 -- Atualizar lista de usuarios remotos ou envia lista de usuarios locais
 local function handleClusterStanza(stanza) 
 
-	module:log("debug", "cluster_SERVER handleClusterStanza: %s", stanza.attr.cluster_from);
-	--<cluster type='available' cluster_from='cluster1.hostx.net' from='gd@hostx.net' xmlns='urn:xmpp:cluster'/>
+	module:log("debug", "cluster_SERVER handleClusterStanza: %s", stanza.attr.node_from);
+	--<cluster type='available' node_from='cluster1.hostx.net' from='gd@hostx.net' xmlns='urn:xmpp:cluster'/>
 	jid = jid_bare(stanza.attr.from);
 
 	if stanza.name == "cluster" then
 
 		if stanza.attr.type == "available" then
 
-			cluster_users[jid] = stanza.attr.cluster_from;
+			cluster_users[jid] = stanza.attr.node_from;
 		
 		elseif stanza.attr.type == "unavailable" then
 			cluster_users[jid] = nil;
 		
 		elseif stanza.attr.type == "probe" then
-			if stanza.attr.cluster_from then
-				sendLocalSessions(stanza.attr.cluster_from);
+			if stanza.attr.node_from then
+				sendLocalSessions(stanza.attr.node_from);
 			end
 			
 		end
@@ -276,7 +276,7 @@ function listener.onconnect(conn)
 		conn:setoption("keepalive", opt_keepalives);
 	end
 
-	module:log("info", "incoming cluster connection");
+	module:log("info", "incoming node connection");
 
 	local stream = new_xmpp_stream(session, stream_callbacks);
 	session.stream = stream;

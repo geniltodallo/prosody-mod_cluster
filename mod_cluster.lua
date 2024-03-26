@@ -13,13 +13,13 @@ local fire_event = prosody.events.fire_event;
 local hosts = prosody.hosts;
 
 local remote_servers = module:get_option("cluster_servers", {});
-local cluster_name = module:get_option("cluster_name", nil);
+local node_name = module:get_option("cluster_node_name", nil);
 
-if not cluster_name then
-    error("cluster_name not configured.", 0);
+if not node_name then
+    error("cluster_node_name not configured.", 0);
 end
 
-module:log("info", "%s added to cluster %s", module.host, cluster_name);
+module:log("info", "%s added to cluster %s", module.host, node_name);
 
 
 if not prosody.cluster_users then
@@ -43,18 +43,18 @@ local function deliver_message(event)
     local username, host = jid_split(to);
     local jid = username.."@"..host;
 
-    module:log("debug", "looking up target cluster for "..jid);
+    module:log("debug", "looking up target node for "..jid);
 
-    local cluster = cluster_users[jid]
-    if not cluster then
-        module:log("debug","cluster lookup for "..jid.." failed!");
+    local node = cluster_users[jid]
+    if not node then
+        module:log("debug","node lookup for "..jid.." failed!");
         return nil;
     end
 
-    module:log("debug", "target cluster for "..jid.." is "..cluster);
+    module:log("debug", "target node for "..jid.." is "..node);
 
-    if cluster == cluster_name then
-        module:log("debug", "we are cluster "..cluster..", nothing to do");
+    if node == node_name then
+        module:log("debug", "we are node "..node..", nothing to do");
         return nil;
     end
 
@@ -65,7 +65,7 @@ local function deliver_message(event)
     --             fire_event("cluster/send", { cluster = cluster, stanza = stanza_c });
                 
 
-    fire_event("cluster/send", { cluster = cluster, host = host, stanza = event.stanza });
+    fire_event("cluster/send", { cluster = node, host = host, stanza = event.stanza });
 
 end
 function get_room_from_jid(jid)
@@ -121,13 +121,13 @@ end
 local function handle_room_event(event)
     --EVENTO GRUPOS
     --Verificar lista de usuarios, se tem algum usuario da lista desse grupo que esta online em outro cluster.
-    --enviar a mensagem para o cluster.
+    --enviar a mensagem para o node.
 
     local to = event.stanza.attr.to;
     local node, host, _ = jid_split(to);
     local rhost, room_jid;
 
-    module:log("debug", "looking up target room cluster for %s", to);
+    module:log("debug", "looking up target room node for %s", to);
 
     if node then
         room_jid = jid_bare(to);
@@ -146,8 +146,8 @@ local function handle_room_event(event)
 
             --TODO FAZER A BUSCA EM UMA THREAD..
             for user_jid in muc_members do
-                module:log("debug", "VERIFICANDO CLUSTER MEMBER[%s]", user_jid);
-                --lista de membros, ver quem é de outro cluster e esta online (se esta na lista do cluster esta online).
+                module:log("debug", "VERIFICANDO node MEMBER[%s]", user_jid);
+                --lista de membros, ver quem é de outro node e esta online (se esta na lista do node esta online).
                 local enviar = true;
 
                 if prosody.bare_sessions[user_jid] then
@@ -156,26 +156,26 @@ local function handle_room_event(event)
                 end
             
                 --deliver_message(event);
-                module:log("debug", "looking up target cluster for "..user_jid);
+                module:log("debug", "looking up target node for "..user_jid);
             
-                -- cluster pode ter mais de um cluster/servidor....
-                -- fazer um array de clusters/servidores que precisa enviar
+                -- node pode ter mais de um node/servidor....
+                -- fazer um array de node/servidores que precisa enviar
 
-                local cluster = cluster_users[user_jid];
+                local node = cluster_users[user_jid];
 
-                if not cluster then
-                    module:log("debug","cluster lookup for "..user_jid.." failed!");
+                if not node then
+                    module:log("debug","node lookup for "..user_jid.." failed!");
                     enviar = false;
                 else 
-                    module:log("debug", "target cluster for "..user_jid.." is "..cluster);
-                    clusters_enviar[cluster] = cluster;
+                    module:log("debug", "target node for "..user_jid.." is "..node);
+                    clusters_enviar[node] = node;
                     enviar = true;
 
                 end
             
            
-                if cluster == cluster_name then
-                    module:log("debug", "we are cluster "..cluster..", nothing to do");
+                if node == node_name then
+                    module:log("debug", "we are cluster "..node..", nothing to do");
                     enviar = false;
                 end
 
@@ -184,7 +184,7 @@ local function handle_room_event(event)
             if clusters_enviar then
                 for clusterz, _ in pairs(clusters_enviar) do
                     module:log("debug", "ENVIANDO STANZA:", tostring(stanza_c));
-                    fire_event("cluster/send", { cluster = clusterz, host = host, stanza = stanza_c });
+                    fire_event("cluster/send", { node = clusterz, host = host, stanza = stanza_c });
                 end
                 
 
@@ -195,7 +195,7 @@ local function handle_room_event(event)
         --rhost = redis_mucs.get_room_host(to);
     end
 
-    --fire_event("cluster/send", { cluster = rhost, stanza = event.stanza });
+    --fire_event("cluster/send", { node = rhost, stanza = event.stanza });
     return false;
 end
 
@@ -207,7 +207,7 @@ local function handle_msg(event)
     
 
     -- <presence xml:lang='en' from='dev2@hostx.net/xxx.2.3_e7cifh'><show>away</show><status>away</status><x xmlns='vcard-temp:x:update'><photo/></x></presence>
-    module:log("debug", "mod_cluster": Recebido stanza:", tostring(stanza));
+    module:log("debug", "mod_cluster: Recebido stanza:", tostring(stanza));
 
 
     if not host then
@@ -246,24 +246,24 @@ local function handle_msg(event)
     end
 
     --deliver_message(event);
-    module:log("debug", "looking up target cluster for "..jid);
+    module:log("debug", "looking up target node for "..jid);
 
 
-    local cluster = cluster_users[jid]
-    if not cluster then
-        module:log("debug","cluster lookup for "..jid.." failed!");
+    local node = cluster_users[jid]
+    if not node then
+        module:log("debug","node lookup for "..jid.." failed!");
         return nil;
     end
 
-    module:log("debug", "target cluster for "..jid.." is "..cluster);
+    module:log("debug", "target node for "..jid.." is "..node);
 
-    if cluster == cluster_name then
-        module:log("debug", "we are cluster "..cluster..", nothing to do");
+    if node == node_name then
+        module:log("debug", "we are node "..node..", nothing to do");
         return nil;
     end
         
 
-    fire_event("cluster/send", { cluster = cluster, host = host, stanza = event.stanza });
+    fire_event("cluster/send", { node = node, host = host, stanza = event.stanza });
 
     --presences
     --<presence type='probe' from='dev2@hostx.net/hostx.2.3_34i44h' to='gd3@hostx.net'/> -- desabilitar probe
@@ -272,9 +272,9 @@ local function handle_msg(event)
 
     -- local stanza_c = st.clone(event.stanza);
     --             stanza_c.attr.to = node..'@'..host..'/'..r;
-    --             module:log("debug", "target cluster for %s is %s",
-    --                 stanza_c.attr.to ,cluster);
-    --             fire_event("cluster/send", { cluster = cluster, stanza = stanza_c });
+    --             module:log("debug", "target node for %s is %s",
+    --                 stanza_c.attr.to ,node);
+    --             fire_event("cluster/send", { node = node, stanza = stanza_c });
                 
 
  
@@ -295,13 +295,13 @@ local function handleUserConnected (event)
 		
         module:log("debug", "mod_cluster: Sending user session available to remote server:" .. srv);
         --criar um pacote xmpp de sessao do user
-        --<cluster type='available' cluster_from='cluster1.hostx.net' from='gd@hostx.net' xmlns='urn:xmpp:cluster'/>
+        --<cluster type='available' node_from='cluster1.hostx.net' from='gd@hostx.net' xmlns='urn:xmpp:cluster'/>
         userSessionStanza = st.stanza("cluster", { xmlns = 'urn:xmpp:cluster'});
         userSessionStanza.attr.type = "available";
         userSessionStanza.attr.from = jid;
 
         local host, port = splitHostAndPort(srv)
-        fire_event("cluster/send", { cluster = host, host = host, stanza = userSessionStanza });
+        fire_event("cluster/send", { node = host, host = host, stanza = userSessionStanza });
 
     end
     
@@ -316,20 +316,20 @@ local function handleUserDisconnected (event)
 		
         module:log("debug", "mod_cluster: Sending user session unavailable to remote server:" .. srv);
         --criar um pacote xmpp de sessao do user
-        --<cluster type='unavailable' cluster_from='cluster1.hostx.net' from='gd@hostx.net' xmlns='urn:xmpp:cluster'/>
+        --<cluster type='unavailable' node_from='cluster1.hostx.net' from='gd@hostx.net' xmlns='urn:xmpp:cluster'/>
         userSessionStanza = st.stanza("cluster", { xmlns = 'urn:xmpp:cluster'});
         userSessionStanza.attr.type = "unavailable";
         userSessionStanza.attr.from = jid;
 
         local host, port = splitHostAndPort(srv)
-        fire_event("cluster/send", { cluster = host, host = host, stanza = userSessionStanza });
+        fire_event("cluster/send", { node = host, host = host, stanza = userSessionStanza });
 
     end
 
 end
 
 local function handleConnectedToCluster (event) 
-    local remoteHost = event.cluster;
+    local remoteHost = event.node;
     module:log("debug", "mod_cluster: handleConnectedToCluster: " ..remoteHost);
 end
 
@@ -342,10 +342,10 @@ local function handleConnectedToCluster_old (event)
     --probe for remote users
 	userSessionStanza = st.stanza("cluster", { xmlns = 'urn:xmpp:cluster'});
 	userSessionStanza.attr.type = "probe";
-	userSessionStanza.attr.cluster_from = cluster_name;
-	userSessionStanza.attr.cluster_to = remoteHost;
+	userSessionStanza.attr.node_from = node_name;
+	userSessionStanza.attr.node_to = remoteHost;
 
-	fire_event("cluster/send", { cluster = remoteHost, host = remoteHost, stanza = userSessionStanza });
+	fire_event("cluster/send", { node = remoteHost, host = remoteHost, stanza = userSessionStanza });
 	--conn:write(tostring(userSessionStanza));
 
 	--send local users
@@ -353,12 +353,12 @@ local function handleConnectedToCluster_old (event)
 		
         module:log("debug", "mod_cluster: Sending user session available to remote server:" .. remoteHost);
         --criar um pacote xmpp de sessao do user
-        --<cluster type='available' cluster_from='cluster1.host.net' from='gd@host.net' xmlns='urn:xmpp:cluster'/>
+        --<cluster type='available' node_from='cluster1.host.net' from='gd@host.net' xmlns='urn:xmpp:cluster'/>
         userSessionStanza = st.stanza("cluster", { xmlns = 'urn:xmpp:cluster'});
         userSessionStanza.attr.type = "available";
         userSessionStanza.attr.from = jid;
 
-        fire_event("cluster/send", { cluster = remoteHost, host = remoteHost, stanza = userSessionStanza });
+        fire_event("cluster/send", { node = remoteHost, host = remoteHost, stanza = userSessionStanza });
 
     end
 
@@ -366,7 +366,7 @@ end
 
 local function handleDisconnectedToCluster (event) 
 
-    local remoteHost = event.cluster;
+    local remoteHost = event.node;
     module:log("debug", "mod_cluster: handleDisconnectedToCluster: " ..remoteHost);
 
 end

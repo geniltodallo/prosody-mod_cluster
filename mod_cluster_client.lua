@@ -34,7 +34,7 @@ local stream_callbacks = { default_ns = xmlns_cluster };
 local xmlns_xmpp_streams = "urn:ietf:params:xml:ns:xmpp-streams";
 
 local remote_servers = module:get_option("cluster_servers", {});
-local cluster_name = module:get_option("cluster_name", nil);
+local node_name = module:get_option("cluster_node_name", nil);
 
 module:set_global();
 
@@ -45,11 +45,11 @@ end
 
 function stream_callbacks.error(session, error, data, data2)
 	if session.destroyed then return; end
-	module:log("warn", "Error processing cluster stream: %s", tostring(error));
+	module:log("warn", "Error processing node stream: %s", tostring(error));
 	if error == "no-stream" then
 		session:close("invalid-namespace");
 	elseif error == "parse-error" then
-		module:log("warn", "External cluster %s XML parse error: %s", tostring(session.host), tostring(data));
+		module:log("warn", "External node %s XML parse error: %s", tostring(session.host), tostring(data));
 		session:close("not-well-formed");
 	elseif error == "stream-error" then
 		local condition, text = "undefined-condition";
@@ -118,18 +118,18 @@ local function requisitarUsuariosRemotos(remoteHost)
     --probe for remote users
 	userSessionStanza = st.stanza("cluster", { xmlns = 'urn:xmpp:cluster'});
 	userSessionStanza.attr.type = "probe";
-	userSessionStanza.attr.cluster_from = cluster_name;
-	userSessionStanza.attr.cluster_to = remoteHost;
+	userSessionStanza.attr.node_from = node_name;
+	userSessionStanza.attr.node_to = remoteHost;
 
-	module:fire_event("cluster/send", { cluster = remoteHost, host = remoteHost, stanza = userSessionStanza });
+	module:fire_event("cluster/send", { node = remoteHost, host = remoteHost, stanza = userSessionStanza });
 
 end
 
 
 function listener.onconnect(conn)
-    local cluster = conn:ip();
+    local node = conn:ip();
 
-	local session = { type = "cluster", conn = conn, send = function (data) return conn:write(tostring(data)); end, cluster = cluster };
+	local session = { type = "cluster", conn = conn, send = function (data) return conn:write(tostring(data)); end, node = node };
 
 	-- Logging functions --
 	local conn_name = "sc"..tostring(session):match("[a-f0-9]+$");
@@ -140,7 +140,7 @@ function listener.onconnect(conn)
 		conn:setoption("keepalive", opt_keepalives);
 	end
 
-	module:log("info", "outgoing cluster connection");
+	module:log("info", "outgoing node connection");
 
 	local stream = new_xmpp_stream(session, stream_callbacks);
 	session.stream = stream;
@@ -161,17 +161,17 @@ function listener.onconnect(conn)
 		xmlns = xmlns_cluster;
 	}):top_tag());
 
-    local queue = queue[cluster];
+    local queue = queue[node];
     for i,s in pairs(queue) do
         conn:write(tostring(s));
     end
-    queue[cluster] = nil;
+    queue[node] = nil;
 
 	sessions[conn] = session;
 
-	requisitarUsuariosRemotos(cluster);
+	requisitarUsuariosRemotos(node);
 
-	module:fire_event("cluster/connectedToCluster", { cluster = cluster });
+	module:fire_event("cluster/connectedToCluster", { node = node });
 
 end
 
@@ -184,10 +184,10 @@ function listener.ondisconnect(conn, err)
 	local session = sessions[conn];
 
 	if (session) then
-		module:log("info", "cluster disconnected: %s (%s)", tostring(session.cluster), tostring(err));
+		module:log("info", "node disconnected: %s (%s)", tostring(session.node), tostring(err));
 		if session.on_destroy then session:on_destroy(err); end
 		sessions[conn] = nil;
-		conns[session.cluster] = nil;
+		conns[session.node] = nil;
 		for k in pairs(session) do
 			if k ~= "log" and k ~= "close" then
 				session[k] = nil;
@@ -197,23 +197,23 @@ function listener.ondisconnect(conn, err)
 	end
 
 	module:log("error", "connection lost");
-	module:fire_event("cluster/disconnected", { reason = err, cluster = conn:ip() });
-	--module:fire_event("cluster/disconnectedToCluster", { cluster = conn:ip() });
+	module:fire_event("cluster/disconnected", { reason = err, node = conn:ip() });
+	--module:fire_event("cluster/disconnectedToCluster", { node = conn:ip() });
 
 end
 
-function connect (cluster)
+function connect (node)
 
-	module:log("info", "mod_cluster_client: Connecting to cluster server:"..cluster);
+	module:log("info", "mod_cluster_client: Connecting to node server:"..node);
 
 	local conn = socket.tcp ( )
 	conn:settimeout ( 10 )
-	local ok, err = conn:connect (cluster, 7473)
+	local ok, err = conn:connect (node, 7473)
 	if not ok and err ~= "timeout" then
 		return nil, err;
 	end
 
-	local handler, conn = server.wrapclient ( conn , cluster , 7473 , listener , "*a")
+	local handler, conn = server.wrapclient ( conn , node , 7473 , listener , "*a")
 	return handler;
 end
 
@@ -225,38 +225,38 @@ module:hook_global("server-stopping", function(event)
 end, 1000);
 
 function handle_send (event)
-    local cluster = event.cluster;
+    local node = event.node;
     local stanza = event.stanza;
 	local to = event.stanza.attr.to;
     local from = event.stanza.attr.from;
     local username, host = jid_split(to);
 
-	--Adicionar qual cluster ta enviando o stanza né
-	stanza.attr.cluster_from = cluster_name;
+	--Adicionar qual node ta enviando o stanza né
+	stanza.attr.node_from = node_name;
 	
-    module:log("debug", "got stanza for cluster "..cluster);
+    module:log("debug", "got stanza for node "..node);
 
 	--if event.host ~= module.host then
     --    module:log("debug", event.host.." host do user diferente do modulo:" ..module.host);
     --    return nil
     --end
 	
-    local conn = conns[cluster];
+    local conn = conns[node];
     if conn == nil then
-        module:log("debug", "connecting to "..cluster.." for delivery");
+        module:log("debug", "connecting to "..node.." for delivery");
         local err;
-        conn, err = connect(cluster);
+        conn, err = connect(node);
         if not conn then
-            module:log("error", "couldn't connect to "..cluster..": "..err);
+            module:log("error", "couldn't connect to "..node..": "..err);
             return;
         end
-        conns[cluster] = conn;
-        queue[cluster] = {};
+        conns[node] = conn;
+        queue[node] = {};
     end
 
     local session = sessions[conn]
     if session == nil then
-        table.insert(queue[cluster], stanza)
+        table.insert(queue[node], stanza)
     else
         conn:write(tostring(stanza));
     end
@@ -274,11 +274,11 @@ function timerConnectRemote()
 
 		local conn = conns[host];
 		if conn == nil then
-			--module:log("debug", "connecting to cluster "..host);
+			module:log("debug", "connecting to node "..host);
 			local err;
 			conn, err = connect(host);
 			if not conn then
-				module:log("error", "couldn't connect to cluster "..host..": "..err);
+				module:log("error", "couldn't connect to node "..host..": "..err);
 				--return;
 			else
 				conns[host] = conn;
@@ -296,8 +296,12 @@ end
 function handle_start (event)
 
 	module:log("debug", "Module cluster_client server-started");
+
 	--Timer to verify remote connection -- 60 seconds
 	timer.add_task(60, timerConnectRemote);
+
+	--Connect as soon as possible!
+	timerConnectRemote();
 
 end
 
