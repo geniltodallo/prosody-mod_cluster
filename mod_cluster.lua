@@ -36,38 +36,6 @@ function splitHostAndPort(inputstr)
     return host, port
 end
 
-
-local function deliver_message(event)
-    local to = event.stanza.attr.to;
-    local from = event.stanza.attr.from;
-    local username, host = jid_split(to);
-    local jid = username.."@"..host;
-
-    module:log("debug", "looking up target node for "..jid);
-
-    local node = cluster_users[jid]
-    if not node then
-        module:log("debug","node lookup for "..jid.." failed!");
-        return nil;
-    end
-
-    module:log("debug", "target node for "..jid.." is "..node);
-
-    if node == node_name then
-        module:log("debug", "we are node "..node..", nothing to do");
-        return nil;
-    end
-
-    -- local stanza_c = st.clone(event.stanza);
-    --             stanza_c.attr.to = node..'@'..host..'/'..r;
-    --             module:log("debug", "target cluster for %s is %s",
-    --             stanza_c.attr.to ,cluster);
-    --             fire_event("cluster/send", { cluster = cluster, stanza = stanza_c });
-                
-
-    fire_event("cluster/send", { cluster = node, host = host, stanza = event.stanza });
-
-end
 function get_room_from_jid(jid)
     local node, host = jid_split(jid);
     local component = hosts[host];
@@ -133,7 +101,7 @@ local function handle_room_event(event)
         room_jid = jid_bare(to);
         if is_local_room(room_jid) then
             module:log("debug", "room[%s] is hosted here. Nothing to do", room_jid);
-            --check_redis_info(room_jid);
+            
             local muc_room = get_room_from_jid(room_jid);
 
             local muc_members = get_members(muc_room);
@@ -192,7 +160,6 @@ local function handle_room_event(event)
 
             return false;
         end
-        --rhost = redis_mucs.get_room_host(to);
     end
 
     --fire_event("cluster/send", { node = rhost, stanza = event.stanza });
@@ -207,7 +174,7 @@ local function handle_msg(event)
     
 
     -- <presence xml:lang='en' from='dev2@hostx.net/xxx.2.3_e7cifh'><show>away</show><status>away</status><x xmlns='vcard-temp:x:update'><photo/></x></presence>
-    module:log("debug", "mod_cluster: Recebido stanza:", tostring(stanza));
+    module:log("debug", "mod_cluster: Processing stanza:", tostring(stanza));
 
 
     if not host then
@@ -255,14 +222,16 @@ local function handle_msg(event)
         return nil;
     end
 
-    module:log("debug", "target node for "..jid.." is "..node);
-
     if node == node_name then
         module:log("debug", "we are node "..node..", nothing to do");
         return nil;
     end
-        
+       
+    module:log("debug", "target node for "..jid.." is "..node);
 
+    -- se node failed, retorna true?  se encontrou retorna nil.
+    -- testar com gd offline ver se dispara push
+    -- 
     fire_event("cluster/send", { node = node, host = host, stanza = event.stanza });
 
     --presences
@@ -280,7 +249,7 @@ local function handle_msg(event)
  
 
     return true; --nao processar mais a mensagem, esta salvando como offline pois user nao tem session here
-    -- precisa processar ACK! ack com prioridade 1000 processou antes do mod_cluster
+    -- precisa processar ACK! ack com prioridade 1001 processou antes do mod_cluster
 
 end
 
@@ -371,19 +340,40 @@ local function handleDisconnectedToCluster (event)
 
 end
 
+local function handle_msg_thread(event) 
 
---TODO: Quando cair conexao do host, excluir sessoes dos usuarios remotos
+    --handle_msg(event);
+    local thread1 = coroutine.create(handle_msg);
+    return coroutine.resume(thread1, event);
 
--- pre-message/bare ta caindo aqui -- com return true na funcao handle ele para de rotear a mensagem(nao salva sql local nem offline message etc, deixar pra salvar no server remoto,
--- pois offline tava salvando aqui, pois a sessao do user ta em outro server...
---message/full ta caindo, mas ta dizendo que tem sessao aqui mesmo nao tendo?!? e ta salvando offline
-module:hook("pre-message/full", handle_msg, 1);
-module:hook("pre-message/bare", handle_msg, 1);
+end
+
+-- IMPORTANTE: FOI TENTANDO HANDLE_MSG_THREAD COM COROUTINE, PRECISA RETORNAR O VALOR DA OUTRA FUNCAO, CONTINUOU PROCESSANDO STANZAS MESMO COM RETURN TRUE
+-- module:hook("pre-message/full", handle_msg_thread, 1001); -- precisa ser prioridade 1 aqui no cluster e 2 no mod_log_messages sei la nao funciona nada
+-- module:hook("pre-message/bare", handle_msg_thread, 1001); -- precisa ser prioridade 1 aqui no cluster e 2 no mod_log_messages nao funcoina nada 1000 1 coco xixi
+-- module:hook("pre-presence/bare", handle_msg_thread, 1001);
+-- module:hook("pre-presence/full", handle_msg_thread, 1001);
+
+module:hook("pre-message/full", handle_msg, 1); 
+module:hook("pre-message/bare", handle_msg, 1); 
 module:hook("pre-presence/bare", handle_msg, 1000);
 module:hook("pre-presence/full", handle_msg, 1000);
 module:hook("resource-bind", handleUserConnected);
 module:hook("resource-unbind", handleUserDisconnected);
-module:hook_global("cluster/connectedToCluster", handleConnectedToCluster, 1000);
-module:hook_global("cluster/disconnectedToCluster", handleDisconnectedToCluster, 1000);
+
+-- 09/04/2024
+-- Com 1000 cluster e 2 no log_messages, chamou duas vezes - full e bare? - 1001 ficou por primeiro, ack segundo, log_messages terceiro offline storage quarto.
+-- Com 1 cluster e 2 no log_messages, chamou uma vez só. - ack em primeiro, log messages em segundo, cluster em terceiro, offline em quarto
+-- Com prioridade 1000 acima de log_messages, nao gravou pra quem enviou. so pra quem recebeu. Certo é 1 aqui e 2 no log_messages.
+
+--module:hook_global("cluster/connectedToCluster", handleConnectedToCluster, 1000); --dispara pra cada dominio
+--module:hook_global("cluster/disconnectedToCluster", handleDisconnectedToCluster, 1000); -- dispara pra cada dominio
 
 module:log("debug", "hooked at %s", module:get_host());
+
+
+-- PROSODY EVENT PRIORITIES:
+-- -1 Delivery to the session only
+-- 0 "Read-only" stanza interception, for stanzas that are going to be delivered, e.g. for archiving. Do not modify or drop the stanza in priority 0 handlers.
+-- 1 - 999 For general processing modules that may modify or drop stanzas
+-- 1000+ Pre-processing filters, typically used to drop stanzas before they are seen by most modules.

@@ -19,9 +19,6 @@ local hosts = prosody.hosts;
 
 local log = module._log;
 
-local opt_keepalives = module:get_option_boolean("cluster_tcp_keepalives",
-    module:get_option_boolean("tcp_keepalives", true));
-
 local conns = {};
 local queue = {};
 
@@ -30,6 +27,7 @@ local listener = {};
 local sessions = module:shared("sessions");
 
 local xmlns_cluster = 'prosody:cluster';
+
 local stream_callbacks = {
     default_ns = xmlns_cluster
 };
@@ -39,11 +37,32 @@ local xmlns_xmpp_streams = "urn:ietf:params:xml:ns:xmpp-streams";
 local remote_servers = module:get_option("cluster_servers", {});
 local node_name = module:get_option("cluster_node_name", nil);
 
+if not prosody.cluster_users then
+    prosody.cluster_users = {};
+end
+local cluster_users = prosody.cluster_users;
+
+
 module:set_global();
 
 function splitHostAndPort(inputstr)
     local host, port = inputstr:match("([^:]+):([^:]+)")
     return host, port
+end
+
+local function clearRemoteSessions(remoteServer)
+
+    module:log("info", "Cluster clear remote sessions from " ..remoteServer);
+
+    for jid, host in pairs(cluster_users) do
+
+        if host == remoteServer then
+            module:log("debug", "Clear remote session jid:" .. jid .. " from " ..remoteServer);
+            cluster_users[jid] = nil;
+        end
+
+    end
+
 end
 
 function stream_callbacks.error(session, error, data, data2)
@@ -164,11 +183,9 @@ function listener.onconnect(conn)
     -- session.log = logger.init(conn_name);
     session.close = session_close;
 
-    if opt_keepalives then
-        conn:setoption("keepalive", opt_keepalives);
-    end
+    conn:setoption("keepalive", true);
 
-    module:log("info", "outgoing node connection");
+    module:log("info", "Cluster outgoing node connection to " ..node);
 
     local stream = new_xmpp_stream(session, stream_callbacks);
     session.stream = stream;
@@ -217,7 +234,8 @@ function listener.ondisconnect(conn, err)
     local session = sessions[conn];
 
     if (session) then
-        module:log("info", "node disconnected: %s (%s)", tostring(session.node), tostring(err));
+        module:log("info", "Cluster server node disconnected: %s (%s)", tostring(session.node), tostring(err));
+        clearRemoteSessions(session.node);
         if session.on_destroy then
             session:on_destroy(err);
         end
@@ -240,9 +258,20 @@ function listener.ondisconnect(conn, err)
 
 end
 
+function listener.onreadtimeout(conn)
+
+    local session = sessions[conn];
+	if session then
+		session.send(" ");
+		return true;
+	end
+
+end
+
+
 function connect(node)
 
-    module:log("info", "mod_cluster_client: Connecting to node server:" .. node);
+    module:log("info", "Cluster connecting to node server:" .. node);
 
     local conn = socket.tcp()
     conn:settimeout(10)
@@ -272,7 +301,7 @@ function handle_send(event)
     local from = event.stanza.attr.from;
     local username, host = jid_split(to);
 
-    -- Adicionar qual node ta enviando o stanza né
+    -- Adicionar qual node ta enviando o stanza
     stanza.attr.node_from = node_name;
 
     module:log("debug", "got stanza for node " .. node);
@@ -345,8 +374,7 @@ function timerConnectRemote()
             local err;
             conn, err = connect(host);
             if not conn then
-                module:log("error", "couldn't connect to node " .. host .. ": " .. err);
-                -- return;
+                module:log("info", "Cluster couldn't connect to node " .. host .. ": " .. err);
             else
                 conns[host] = conn;
                 queue[host] = {};
@@ -356,12 +384,12 @@ function timerConnectRemote()
 
             -- node connected, send ping
             sendPing(host);
-
+            --conn:write(' ');
         end
 
     end
 
-    return 60; -- 60 seconds
+    return 30; -- 30 seconds
 
 end
 
@@ -369,8 +397,8 @@ function handle_start(event)
 
     module:log("debug", "Module cluster_client server-started");
 
-    -- Timer to verify remote connection -- 60 seconds
-    timer.add_task(60, timerConnectRemote);
+    -- Timer to verify remote connection -- 30 seconds
+    timer.add_task(30, timerConnectRemote);
 
     -- Connect as soon as possible!
     timerConnectRemote();
@@ -378,6 +406,5 @@ function handle_start(event)
 end
 
 module:hook_global("cluster/send", handle_send, 1000);
--- module:hook("cluster/send", handle_send, 1000);
 module:hook_global("server-started", handle_start);
 

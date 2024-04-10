@@ -23,9 +23,6 @@ if not node_name then
     error("cluster_node_name not configured", 0);
 end
 
-local opt_keepalives = module:get_option_boolean("cluster_tcp_keepalives",
-    module:get_option_boolean("tcp_keepalives", true));
-
 local sessions = module:shared("sessions");
 
 --- Network and stream part ---
@@ -82,7 +79,7 @@ function stream_callbacks.error(session, error, data, data2)
         text = condition .. (text and (" (" .. text .. ")") or "");
         module:log("info", "Session closed by remote with error: %s", text);
         session:close(nil, text);
-    end
+    end 
 end
 
 function stream_callbacks.streamopened(session, attr)
@@ -148,16 +145,33 @@ local function send_muc_message(stanza)
 
 end
 
+
+local function clearRemoteSessions(remoteServer)
+
+    module:log("info", "Cluster clear remote sessions from " ..remoteServer);
+
+    for jid, host in pairs(cluster_users) do
+
+        if host == remoteServer then
+            module:log("debug", "Clear remote session jid:" .. jid .. " from " ..remoteServer);
+            cluster_users[jid] = nil;
+        end
+
+    end
+
+end
+
 function sendLocalSessions(remoteServer)
 
     for jid, session in pairs(bare_sessions) do
 
-        module:log("debug", "mod_cluster PROBE: Sending local users to remote server:" .. remoteServer);
+        module:log("debug", "mod_cluster PROBE: Sending local user ".. jid .. " to remote server:" .. remoteServer);
         -- criar um pacote xmpp de sessao do user
         -- <cluster type='available' node_from='cluster1.hostx.net' from='gd@hostx.net' xmlns='urn:xmpp:cluster'/>
         userSessionStanza = st.stanza("cluster", {
             xmlns = 'urn:xmpp:cluster'
         });
+
         userSessionStanza.attr.type = "available";
         userSessionStanza.attr.from = jid;
 
@@ -176,16 +190,23 @@ local function handleClusterStanza(stanza)
 
     module:log("debug", "cluster_SERVER handleClusterStanza: %s", stanza.attr.node_from);
     -- <cluster type='available' node_from='cluster1.hostx.net' from='gd@hostx.net' xmlns='urn:xmpp:cluster'/>
-    jid = jid_bare(stanza.attr.from);
+    local jid = jid_bare(stanza.attr.from);
 
     if stanza.name == "cluster" then
 
         if stanza.attr.type == "available" then
 
+            
             cluster_users[jid] = stanza.attr.node_from;
 
+            module:log("info", "Cluster add remote session: ".. jid .. " from "..stanza.attr.node_from);
+
         elseif stanza.attr.type == "unavailable" then
+
             cluster_users[jid] = nil;
+
+            module:log("info", "Cluster remove remote session: ".. jid .. " from "..stanza.attr.node_from);
+
 
         elseif stanza.attr.type == "probe" then
             if stanza.attr.node_from then
@@ -212,10 +233,11 @@ local function handleClusterStanza(stanza)
             });
 
         end
-
     end
-
 end
+
+
+
 
 local function handleerr(err)
     log("error", "Traceback[component]: %s", traceback(tostring(err), 2));
@@ -303,13 +325,14 @@ local function session_close(session, reason)
         session.conn:close();
         listener.ondisconnect(session.conn, "stream error");
 
-        -- TODO: Quando cair conexao do host, excluir sessoes dos usuarios remotos
-
     end
 end
 
 --- Component connlistener
 function listener.onconnect(conn)
+
+    conn:setoption("keepalive", true);
+
     local _send = conn.write;
     local session = {
         type = "cluster",
@@ -319,16 +342,15 @@ function listener.onconnect(conn)
         end
     };
 
+    local node = conn:ip();
+
+
     -- Logging functions --
     local conn_name = "ss" .. tostring(session):match("[a-f0-9]+$");
     -- session.log = logger.init(conn_name);
     session.close = session_close;
 
-    if opt_keepalives then
-        conn:setoption("keepalive", opt_keepalives);
-    end
-
-    module:log("info", "incoming node connection");
+    module:log("info", "Cluster incoming node connection from " ..node);
 
     local stream = new_xmpp_stream(session, stream_callbacks);
     session.stream = stream;
@@ -357,9 +379,20 @@ function listener.onconnect(conn)
 
 end
 
+function listener.onreadtimeout(conn)
+
+    local session = sessions[conn];
+	if session then
+		session.send(" ");
+		return true;
+	end
+
+end
+
 -- Recebe pacotes do outro server
 function listener.onincoming(conn, data)
     local session = sessions[conn];
+    local remoteHost = session.host;
     module:log("debug", "Received incoming remote data: %s", data);
 
     session.data(conn, data);
@@ -367,7 +400,12 @@ end
 function listener.ondisconnect(conn, err)
     local session = sessions[conn];
     if session then
-        module:log("info", "component disconnected: %s (%s)", tostring(session.host), tostring(err));
+        local node = conn:ip()
+        module:log("info", "Cluster client node disconnected: %s (%s)", tostring(node), tostring(err));
+
+        if session.host then
+           clearRemoteSessions(session.host);
+        end
         if session.on_destroy then
             session:on_destroy(err);
         end
