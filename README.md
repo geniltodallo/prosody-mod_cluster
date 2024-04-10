@@ -1,5 +1,5 @@
 # prosody-mod_cluster
-Module cluster for Prosody IM
+Module cluster for Prosody IM for HA Purposes.
 
 This is a cluster module for Prosody.IM
 
