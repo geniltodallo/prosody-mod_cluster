@@ -128,24 +128,48 @@ local function handle_room_event(event)
             
                 -- node pode ter mais de um node/servidor....
                 -- fazer um array de node/servidores que precisa enviar
+                -- TODO: definir estrutura array separar index por host ou index por server e host?
+                -- Tem ideia de concatenar o index [@host1.net-@cluster1.host1.net]
+                -- [@host1.net-@cluster1.host1.net] [@host1.net-@cluster2.host1.net]
+                --
 
-                local node = cluster_users[user_jid];
 
-                if not node then
+                local user_nodes = cluster_users[user_jid];
+                if not user_nodes then
                     module:log("debug","node lookup for "..user_jid.." failed!");
-                    enviar = false;
-                else 
-                    module:log("debug", "target node for "..user_jid.." is "..node);
-                    clusters_enviar[node] = node;
-                    enviar = true;
-
+                    return nil;
                 end
             
-           
-                if node == node_name then
-                    module:log("debug", "we are cluster "..node..", nothing to do");
-                    enviar = false;
+                --For every node
+                for _, node in pairs(user_nodes) do
+                    if node == node_name then
+                        module:log("debug", "we are node "..node..", nothing to do");
+                    else
+                        module:log("debug", "target node for "..user_jid.." is "..node);
+                        fire_event("cluster/send", { node = node, host = host, stanza = event.stanza });
+                        clusters_enviar[node] = node;
+                        enviar = true;
+                    end
                 end
+
+
+                -- local node = cluster_users[user_jid];
+
+                -- if not node then
+                --     module:log("debug","node lookup for "..user_jid.." failed!");
+                --     enviar = false;
+                -- else 
+                --     module:log("debug", "target node for "..user_jid.." is "..node);
+                --     clusters_enviar[node] = node;
+                --     enviar = true;
+
+                -- end
+            
+           
+                -- if node == node_name then
+                --     module:log("debug", "we are cluster "..node..", nothing to do");
+                --     enviar = false;
+                -- end
 
             end
 
@@ -165,6 +189,36 @@ local function handle_room_event(event)
     --fire_event("cluster/send", { node = rhost, stanza = event.stanza });
     return false;
 end
+
+-- Send carbon copy to local session if has jid from
+local function send_carbon_copy(stanza, node)
+	local orig_type = stanza.attr.type;
+    local jid_from = stanza.attr.from;
+    local bare_jid_from = jid_bare(jid_from);
+	local user_sessions = bare_sessions[bare_jid_from];
+    
+    local xmlns_carbons = "urn:xmpp:carbons:2";
+    local xmlns_forward = "urn:xmpp:forward:0";
+
+    local copy = st.clone(stanza);
+    copy.attr.xmlns = "jabber:client";
+    local carbon = st.message{ from = jid_from, type = orig_type, }
+        :tag("sent", { xmlns = xmlns_carbons })
+            :tag("forwarded", { xmlns = xmlns_forward })
+                :add_child(copy):reset();
+    carbon.attr.to = bare_jid_from;
+    
+    module:log("debug", "Sending carbon to remote user %s", bare_jid_from);
+    fire_event("cluster/send", { node = node, host = node, stanza = carbon });
+
+
+    --TODO
+    -- local user_sessions = bare_sessions[bare_jid_from];
+    -- for _, session in pairs(user_sessions.sessions) do   
+    --     -- Carbons are sent to resources that have enabled it
+    --     if session.want_carbons then
+end
+
 
 local function handle_msg(event)
     local to = event.stanza.attr.to;
@@ -195,12 +249,9 @@ local function handle_msg(event)
         return nil
     end
 
-    local jid = username.."@"..host;
+    local jid = jid_bare(to);
 
-    if prosody.bare_sessions[jid] then
-        module:log("debug", jid.." has a session here, nothing to do");
-        return nil
-    end
+    local jid_from = jid_bare(from);
 
     if stanza.name == "presence" then
         module:log("debug", "STANZA.PRESENCE ---------------");
@@ -215,25 +266,48 @@ local function handle_msg(event)
     --deliver_message(event);
     module:log("debug", "looking up target node for "..jid);
 
+    -- TODO FUTURE IDEA:
+    -- user_sessions = { resource, node };
+    -- [{ app, cluster1.host1.com}, { desk, cluster2.host1.com}, { desk2, cluster3.host1.com }]
 
-    local node = cluster_users[jid]
-    if not node then
+    -- Carbon:
+    --TODO Verificar se sessao do user tem carbon
+    --Gerar carbon aqui
+    local user_nodes_carbon = cluster_users[jid_from];
+    if user_nodes_carbon then
+        --For every node
+        for _, node in pairs(user_nodes_carbon) do
+            if node == node_name then
+                module:log("debug", "we are node carbon? "..node..", nothing to do");
+            else
+                send_carbon_copy(stanza, node);            
+            end
+        end
+    end
+
+    
+    local user_nodes = cluster_users[jid];
+    if not user_nodes then
         module:log("debug","node lookup for "..jid.." failed!");
         return nil;
     end
+    --For every node
+    for _, node in pairs(user_nodes) do
+        if node == node_name then
+            module:log("debug", "we are node "..node..", nothing to do");
+        else
+            module:log("debug", "target node for "..jid.." is "..node);
+            fire_event("cluster/send", { node = node, host = host, stanza = event.stanza });
+        end
+    end
 
-    if node == node_name then
-        module:log("debug", "we are node "..node..", nothing to do");
-        return nil;
+    if prosody.bare_sessions[jid] then
+        module:log("debug", jid.." has a session here, nothing more to do");
+        --Usuario pode ter sessao remota e mais de um nó remoto!
+        --TODO ver como salva isso
+        return nil
     end
        
-    module:log("debug", "target node for "..jid.." is "..node);
-
-    -- se node failed, retorna true?  se encontrou retorna nil.
-    -- testar com gd offline ver se dispara push
-    -- 
-    fire_event("cluster/send", { node = node, host = host, stanza = event.stanza });
-
     --presences
     --<presence type='probe' from='dev2@hostx.net/hostx.2.3_34i44h' to='gd3@hostx.net'/> -- desabilitar probe
     --<presence from='dev2@hostx.net/hostx.2.3_34i44h' xml:lang='en'><show>online</show><status>online</status><x xmlns='vcard-temp:x:update'><photo/></x><delay from='hostx.net' stamp='2023-10-12T14:02:58Z' xmlns='urn:xmpp:delay'/></presence>
@@ -246,8 +320,6 @@ local function handle_msg(event)
     --             fire_event("cluster/send", { node = node, stanza = stanza_c });
                 
 
- 
-
     return true; --nao processar mais a mensagem, esta salvando como offline pois user nao tem session here
     -- precisa processar ACK! ack com prioridade 1001 processou antes do mod_cluster
 
@@ -257,7 +329,11 @@ local function handleUserConnected (event)
     local session = event.session;
     local username = session.username;
     --	local from_jid = session.full_jid or (username .. "@" .. module.host);
-    local jid = jid_bare(session.full_jid);
+    --local jid = jid_bare(session.full_jid);
+
+    local jid = session.full_jid;
+
+
 
 
     for key, srv in pairs(remote_servers) do

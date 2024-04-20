@@ -185,7 +185,19 @@ function listener.onconnect(conn)
 
     conn:setoption("keepalive", true);
 
-    module:log("info", "Cluster outgoing node connection to " ..node);
+    module:log("info", "Cluster connected to " ..node);
+
+    -- VERIFY CERT
+    local sock = conn:socket();
+    if sock.info then
+        local info = sock:info();
+        (session.log or log)("info", "Stream encrypted (%s with %s)", info.protocol, info.cipher);
+    end
+    local cert
+	if conn.getpeercertificate then
+		cert = conn:getpeercertificate()
+	end
+
 
     local stream = new_xmpp_stream(session, stream_callbacks);
     session.stream = stream;
