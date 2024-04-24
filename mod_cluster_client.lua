@@ -54,11 +54,24 @@ local function clearRemoteSessions(remoteServer)
 
     module:log("info", "Cluster clear remote sessions from " ..remoteServer);
 
-    for jid, host in pairs(cluster_users) do
+    -- for jid, host in pairs(cluster_users) do
 
-        if host == remoteServer then
-            module:log("debug", "Clear remote session jid:" .. jid .. " from " ..remoteServer);
-            cluster_users[jid] = nil;
+    --     if host == remoteServer then
+    --         module:log("debug", "Clear remote session jid:" .. jid .. " from " ..remoteServer);
+    --         cluster_users[jid] = nil;
+    --     end
+
+    -- end
+
+    for jid, user_nodes in pairs(cluster_users) do
+        
+        for fulljid, host in pairs(user_nodes) do
+
+            if host == remoteServer then
+                module:log("debug", "Clear remote session jid:" .. fulljid .. " from " ..remoteServer);
+                user_nodes[fulljid] = nil;
+            end
+
         end
 
     end

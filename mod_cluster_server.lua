@@ -198,11 +198,15 @@ local function clearRemoteSessions(remoteServer)
 
     module:log("info", "Cluster clear remote sessions from " ..remoteServer);
 
-    for jid, host in pairs(cluster_users) do
+    for jid, user_nodes in pairs(cluster_users) do
+        
+        for fulljid, host in pairs(user_nodes) do
 
-        if host == remoteServer then
-            module:log("debug", "Clear remote session jid:" .. jid .. " from " ..remoteServer);
-            cluster_users[jid] = nil;
+            if host == remoteServer then
+                module:log("debug", "Clear remote session jid:" .. fulljid .. " from " ..remoteServer);
+                user_nodes[fulljid] = nil;
+            end
+
         end
 
     end
@@ -211,23 +215,31 @@ end
 
 function sendLocalSessions(remoteServer)
 
-    for jid, session in pairs(bare_sessions) do
 
-        module:log("debug", "mod_cluster PROBE: Sending local user ".. jid .. " to remote server:" .. remoteServer);
-        -- criar um pacote xmpp de sessao do user
-        -- <cluster type='available' node_from='cluster1.hostx.net' from='gd@hostx.net' xmlns='urn:xmpp:cluster'/>
-        userSessionStanza = st.stanza("cluster", {
-            xmlns = 'urn:xmpp:cluster'
-        });
+    --para cada usuario
+    for jid, user_sessions in pairs(bare_sessions) do
 
-        userSessionStanza.attr.type = "available";
-        userSessionStanza.attr.from = jid;
+        --para cada sessao do usuario
+        for key, session in pairs(user_sessions.sessions) do
 
-        module:fire_event("cluster/send", {
-            node = remoteServer,
-            host = remoteServer,
-            stanza = userSessionStanza
-        });
+            module:log("debug", "mod_cluster PROBE: Sending local user ".. jid .. " to remote server:" .. remoteServer);
+            module:log("debug", "mod_cluster PROBE: Sending local user key:".. key .. " session: " .. session.full_jid .. " to remote server:" .. remoteServer);
+            -- criar um pacote xmpp de sessao do user
+            -- <cluster type='available' node_from='cluster1.hostx.net' from='gd@hostx.net' xmlns='urn:xmpp:cluster'/>
+            userSessionStanza = st.stanza("cluster", {
+                xmlns = 'urn:xmpp:cluster'
+            });
+    
+            userSessionStanza.attr.type = "available";
+            userSessionStanza.attr.from = session.full_jid;
+    
+            module:fire_event("cluster/send", {
+                node = remoteServer,
+                host = remoteServer,
+                stanza = userSessionStanza
+            });
+
+        end
 
     end
 
@@ -236,14 +248,11 @@ end
 -- Atualizar lista de usuarios remotos ou envia lista de usuarios locais
 local function handleClusterStanza(stanza)
 
-    --module:log("debug", "cluster_SERVER handleClusterStanza: %s", stanza.attr.node_from);
+    module:log("debug", "cluster_SERVER handleClusterStanza: %s", tostring(stanza));
     -- <cluster type='available' node_from='cluster1.hostx.net' from='gd@hostx.net' xmlns='urn:xmpp:cluster'/>
     local jid = jid_bare(stanza.attr.from);
-    --local jid = stanza.attr.from;
-
-    --TODO: resource/sessao/carbon caso usuario ta conectado em mais de um nó remoto.
-    --Salvar usuario em mais de um nó remoto.
-    
+    local jidfull = stanza.attr.from;
+        
     if stanza.name == "cluster" then
 
         if stanza.attr.type == "available" then
@@ -251,19 +260,21 @@ local function handleClusterStanza(stanza)
             
             --cluster_users[jid] = stanza.attr.node_from;
             
+            --cluster_users_nodes[gd@domain.net/sessionzyx] = sv-xyz.domain.net
+            --gd@domain.net/-hsrWe-9 = sv03-3.domain.net
+            --gd@domain.net/resource2_2.2.40_bgi33a = sv03-3.domain.net
+            --gd@domain.net/resource1_1.6.0_abc123 = sv03-3.domain.net
+
             local user_nodes = cluster_users[jid];
             if not user_nodes then
                 user_nodes = {};
             end
 
-            user_nodes[stanza.attr.node_from] = stanza.attr.node_from;
+            user_nodes[jidfull] = stanza.attr.node_from;
 
             cluster_users[jid] = user_nodes;
 
-            --user_nodes[stanza.attr.node_from] = stanza.attr.node_from;
-
-
-            module:log("info", "Cluster add remote session: ".. jid .. " from "..stanza.attr.node_from);
+            module:log("info", "Cluster add remote session: ".. jidfull .. " from "..stanza.attr.node_from);
 
         elseif stanza.attr.type == "unavailable" then
 
@@ -272,20 +283,21 @@ local function handleClusterStanza(stanza)
                 user_nodes = {};
             end
 
-            user_nodes[stanza.attr.node_from] = nil;
+            module:log("info", "Cluster removing remote session: ".. jidfull .. " from "..stanza.attr.node_from);
 
-            local user_nodes_size = #user_nodes;
-            if user_nodes_size > 0 then
+            user_nodes[jidfull] = nil;
+            --TODO pode ter mais de um user no mesmo nó remoto
+
+            local user_nodes_size = 0;
+            for key, node in pairs(user_nodes) do
+                user_nodes_size = user_nodes_size + 1;
+            end
+
+            if user_nodes_size > 0 then                
                 cluster_users[jid] = user_nodes;
             else
                 cluster_users[jid] = nil; 
             end
-
-
-            --cluster_users[jid] = nil;
-
-            module:log("info", "Cluster remove remote session: ".. jid .. " from "..stanza.attr.node_from);
-
 
         elseif stanza.attr.type == "probe" then
             if stanza.attr.node_from then
@@ -323,10 +335,8 @@ local function handleerr(err)
 end
 -- Trata pacote/stanza recebido
 function stream_callbacks.handlestanza(session, stanza)
-    --module:log("debug", "cluster_SERVER stream_callbacks.handlestanza: %s", stanza);
+    -- module:log("debug", "cluster_SERVER stream_callbacks.handlestanza: %s", stanza);
 
-    -- TODO: verificar se temos esse host
-    -- Se for cluster, precisa atualizar a lista de sessoes remotas
     if stanza.name == "cluster" then
         handleClusterStanza(stanza);
     end
@@ -462,8 +472,6 @@ function listener.onconnect(conn)
         module:log("info", "Cluster UNSECURE incoming node connection from " ..node);
 
     end
-
-
 
 	-- if conn:ip() == nil then
 	-- 	conn:close();
