@@ -18,6 +18,8 @@ local hosts = prosody.hosts;
 
 local traceback = debug.traceback;
 
+local cluster_server_port = module:get_option("cluster_server_port", 7473);
+
 local node_name = module:get_option("cluster_node_name", nil);
 if not node_name then
     error("cluster_node_name not configured", 0);
@@ -572,7 +574,8 @@ module:provides("net", {
 	-- 	verify = "none";
     --     -- lua_ssl_verify_depth = 0;
 	-- };
-    default_port = 7473,
+    -- default_port = 7003,
+    default_port = cluster_server_port,
     multiplex = {
         pattern = "^<.*:stream.*%sxmlns%s*=%s*(['\"])" .. xmlns_cluster .. "%1.*>"
     }

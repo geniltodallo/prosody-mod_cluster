@@ -294,18 +294,21 @@ function listener.onreadtimeout(conn)
 end
 
 
-function connect(node)
+function connect(node_, port_)
 
-    module:log("info", "Cluster connecting to node server:" .. node);
+    module:log("info", "Cluster connecting to node server: " .. node_);
 
+    if not port_ then
+        port_ = 7003;
+    end
     local conn = socket.tcp()
     conn:settimeout(10)
-    local ok, err = conn:connect(node, 7473)
+    local ok, err = conn:connect(node_, port_)
     if not ok and err ~= "timeout" then
         return nil, err;
     end
 
-    local handler, conn = server.wrapclient(conn, node, 7473, listener, "*a")
+    local handler, conn = server.wrapclient(conn, node_, port_, listener, "*a")
     return handler;
 end
 
@@ -391,24 +394,24 @@ function timerConnectRemote()
 
     for key, srv in pairs(remote_servers) do
 
-        local host, port = splitHostAndPort(srv)
+        local host_, port_ = splitHostAndPort(srv)
 
-        local conn = conns[host];
+        local conn = conns[host_];
         if conn == nil then
-            module:log("debug", "connecting to node " .. host);
+            module:log("debug", "connecting to node " .. host_.." port:"..port_);
             local err;
-            conn, err = connect(host);
+            conn, err = connect(host_, port_);
             if not conn then
-                module:log("info", "Cluster couldn't connect to node " .. host .. ": " .. err);
+                module:log("info", "Cluster couldn't connect to node " .. host_ .. " :" .. err);
             else
-                conns[host] = conn;
-                queue[host] = {};
+                conns[host_] = conn;
+                queue[host_] = {};
 
             end
         else
 
             -- node connected, send ping
-            sendPing(host);
+            sendPing(host_);
             --conn:write(' ');
         end
 
