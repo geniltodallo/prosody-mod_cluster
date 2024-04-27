@@ -299,7 +299,7 @@ function connect(node_, port_)
     module:log("info", "Cluster connecting to node server: " .. node_);
 
     if not port_ then
-        port_ = 7003;
+        port_ = 7473;
     end
     local conn = socket.tcp()
     conn:settimeout(10)

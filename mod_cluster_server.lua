@@ -45,12 +45,6 @@ if not prosody.cluster_users then
     prosody.cluster_users = {};
 end
 
--- TODO: sessions cluster_users_sessions? ou cluster_users.sessions?
--- Salvar sessoes de usuario remoto, pelo menos uma sessao. Ai sabe que ele ta remoto. E se ta local ver mesmo assim. Pois pode ta remoto tambem.
--- Talvez só precise verificar se ta remoto, e depois se ta local tambem. talvez nao precise saber do resource da sessao? O prosody remoto se encarrega da sessao.
-
-
-
 local cluster_users = prosody.cluster_users;
 
 -- local mod_muc = module:depends"muc"; -- nao deu, diz que precisa ser componente
@@ -87,7 +81,7 @@ function stream_callbacks.error(session, error, data, data2)
         text = condition .. (text and (" (" .. text .. ")") or "");
         module:log("info", "Session closed by remote with error: %s", text);
         session:close(nil, text);
-    end 
+    end
 end
 
 function stream_callbacks.streamopened(session, attr)
@@ -98,7 +92,7 @@ function stream_callbacks.streamopened(session, attr)
         };
         return;
     end
-    --module:log("debug", "Received remote stream_callbacks: %s", attr);
+    -- module:log("debug", "Received remote stream_callbacks: %s", attr);
 
     session.host = attr.to;
     session.streamid = uuid_gen();
@@ -155,11 +149,11 @@ end
 -- nao gerar carbona qui
 -- Send carbon copy to local session if has jid from
 local function send_carbon_copy(stanza)
-	local orig_type = stanza.attr.type;
+    local orig_type = stanza.attr.type;
     local jid_from = stanza.attr.from;
     local bare_jid_from = jid_bare(jid_from);
-	local user_sessions = bare_sessions[bare_jid_from];
-    
+    local user_sessions = bare_sessions[bare_jid_from];
+
     if not user_sessions then
         module:log("debug", "CLUSTER CARBON - User not has session carbon here");
         return
@@ -169,43 +163,47 @@ local function send_carbon_copy(stanza)
         return
     end
 
-	--for _, session in pairs(user_sessions) do
+    -- for _, session in pairs(user_sessions) do
     for _, session in pairs(user_sessions.sessions) do
 
-		module:log("debug", "CARBON ENTROU LOOP USER_SESSIONS DE:" .._);
- 
-		-- Carbons are sent to resources that have enabled it
-		if session.want_carbons then
-            module:log("debug", "CARBON SESSION.WANT_CARBONS::" ..session.want_carbons);
-            
+        module:log("debug", "CARBON ENTROU LOOP USER_SESSIONS DE:" .. _);
+
+        -- Carbons are sent to resources that have enabled it
+        if session.want_carbons then
+            module:log("debug", "CARBON SESSION.WANT_CARBONS::" .. session.want_carbons);
+
             local xmlns_carbons = "urn:xmpp:carbons:2";
             local xmlns_forward = "urn:xmpp:forward:0";
-        
-		    local copy = st.clone(stanza);
+
+            local copy = st.clone(stanza);
             copy.attr.xmlns = "jabber:client";
-            local carbon = st.message{ from = jid_from, type = orig_type, }
-                :tag("sent", { xmlns = xmlns_carbons })
-                    :tag("forwarded", { xmlns = xmlns_forward })
-                        :add_child(copy):reset();
-			carbon.attr.to = session.full_jid;
-			
+            local carbon = st.message {
+                from = jid_from,
+                type = orig_type
+            }:tag("sent", {
+                xmlns = xmlns_carbons
+            }):tag("forwarded", {
+                xmlns = xmlns_forward
+            }):add_child(copy):reset();
+            carbon.attr.to = session.full_jid;
+
             module:log("debug", "Sending carbon to %s", session.full_jid);
-			session.send(carbon);
-            
-		end
-	end
+            session.send(carbon);
+
+        end
+    end
 end
 
 local function clearRemoteSessions(remoteServer)
 
-    module:log("info", "Cluster clear remote sessions from " ..remoteServer);
+    module:log("info", "Cluster clear remote sessions from " .. remoteServer);
 
     for jid, user_nodes in pairs(cluster_users) do
-        
+
         for fulljid, host in pairs(user_nodes) do
 
             if host == remoteServer then
-                module:log("debug", "Clear remote session jid:" .. fulljid .. " from " ..remoteServer);
+                module:log("debug", "Clear remote session jid:" .. fulljid .. " from " .. remoteServer);
                 user_nodes[fulljid] = nil;
             end
 
@@ -217,24 +215,25 @@ end
 
 function sendLocalSessions(remoteServer)
 
-
-    --para cada usuario
+    -- para cada usuario
     for jid, user_sessions in pairs(bare_sessions) do
 
-        --para cada sessao do usuario
+        -- para cada sessao do usuario
         for key, session in pairs(user_sessions.sessions) do
 
-            module:log("debug", "mod_cluster PROBE: Sending local user ".. jid .. " to remote server:" .. remoteServer);
-            module:log("debug", "mod_cluster PROBE: Sending local user key:".. key .. " session: " .. session.full_jid .. " to remote server:" .. remoteServer);
+            module:log("debug", "mod_cluster PROBE: Sending local user " .. jid .. " to remote server:" .. remoteServer);
+            module:log("debug",
+                "mod_cluster PROBE: Sending local user key:" .. key .. " session: " .. session.full_jid ..
+                    " to remote server:" .. remoteServer);
             -- criar um pacote xmpp de sessao do user
             -- <cluster type='available' node_from='cluster1.hostx.net' from='gd@hostx.net' xmlns='urn:xmpp:cluster'/>
             userSessionStanza = st.stanza("cluster", {
                 xmlns = 'urn:xmpp:cluster'
             });
-    
+
             userSessionStanza.attr.type = "available";
             userSessionStanza.attr.from = session.full_jid;
-    
+
             module:fire_event("cluster/send", {
                 node = remoteServer,
                 host = remoteServer,
@@ -254,18 +253,17 @@ local function handleClusterStanza(stanza)
     -- <cluster type='available' node_from='cluster1.hostx.net' from='gd@hostx.net' xmlns='urn:xmpp:cluster'/>
     local jid = jid_bare(stanza.attr.from);
     local jidfull = stanza.attr.from;
-        
+
     if stanza.name == "cluster" then
 
         if stanza.attr.type == "available" then
 
-            
-            --cluster_users[jid] = stanza.attr.node_from;
-            
-            --cluster_users_nodes[gd@domain.net/sessionzyx] = sv-xyz.domain.net
-            --gd@domain.net/-hsrWe-9 = sv03-3.domain.net
-            --gd@domain.net/resource2_2.2.40_bgi33a = sv03-3.domain.net
-            --gd@domain.net/resource1_1.6.0_abc123 = sv03-3.domain.net
+            -- cluster_users[jid] = stanza.attr.node_from;
+
+            -- cluster_users_nodes[gd@domain.net/sessionzyx] = sv-xyz.domain.net
+            -- gd@domain.net/-hsrWe-9 = sv03-3.domain.net
+            -- gd@domain.net/resource2_2.2.40_bgi33a = sv03-3.domain.net
+            -- gd@domain.net/resource1_1.6.0_abc123 = sv03-3.domain.net
 
             local user_nodes = cluster_users[jid];
             if not user_nodes then
@@ -276,7 +274,7 @@ local function handleClusterStanza(stanza)
 
             cluster_users[jid] = user_nodes;
 
-            module:log("info", "Cluster add remote session: ".. jidfull .. " from "..stanza.attr.node_from);
+            module:log("info", "Cluster add remote session: " .. jidfull .. " from " .. stanza.attr.node_from);
 
         elseif stanza.attr.type == "unavailable" then
 
@@ -285,20 +283,20 @@ local function handleClusterStanza(stanza)
                 user_nodes = {};
             end
 
-            module:log("info", "Cluster removing remote session: ".. jidfull .. " from "..stanza.attr.node_from);
+            module:log("info", "Cluster removing remote session: " .. jidfull .. " from " .. stanza.attr.node_from);
 
             user_nodes[jidfull] = nil;
-            --TODO pode ter mais de um user no mesmo nó remoto
+            -- TODO pode ter mais de um user no mesmo nó remoto
 
             local user_nodes_size = 0;
             for key, node in pairs(user_nodes) do
                 user_nodes_size = user_nodes_size + 1;
             end
 
-            if user_nodes_size > 0 then                
+            if user_nodes_size > 0 then
                 cluster_users[jid] = user_nodes;
             else
-                cluster_users[jid] = nil; 
+                cluster_users[jid] = nil;
             end
 
         elseif stanza.attr.type == "probe" then
@@ -317,7 +315,7 @@ local function handleClusterStanza(stanza)
             });
             pongStanza.attr.type = "result";
             pongStanza.attr.node_to = stanza.attr.node_from;
-			pongStanza.attr.id = stanza.attr.id;
+            pongStanza.attr.id = stanza.attr.id;
 
             module:fire_event("cluster/send", {
                 node = pongStanza.attr.node_to,
@@ -328,9 +326,6 @@ local function handleClusterStanza(stanza)
         end
     end
 end
-
-
-
 
 local function handleerr(err)
     log("error", "Traceback[component]: %s", traceback(tostring(err), 2));
@@ -361,7 +356,7 @@ function stream_callbacks.handlestanza(session, stanza)
         nh[k] = v;
     end
     nh.type = "component";
-    --module:log("debug", "cluster_SERVER stream_callbacks.handlestanza NH::", tostring(nh));
+    -- module:log("debug", "cluster_SERVER stream_callbacks.handlestanza NH::", tostring(nh));
 
     return xpcall(function()
         return core_process_stanza(nh, stanza)
@@ -418,25 +413,25 @@ local function session_close(session, reason)
     end
 end
 
---Verify if node is authorized
+-- Verify if node is authorized
 local function is_trusted_node(conn)
 
     -- While this may seem insecure, the module defaults to only trusting 127.0.0.1 and ::1
-	if trusted_networks:empty() then
+    if trusted_networks:empty() then
         module:log("info", "No trusted nodes configured! Please add cluster_nodes_trusted={x.x.x.x} to conf.");
-		return false;
-	end
+        return false;
+    end
 
-	-- Iterate through all trusted proxies and check for match against connected IP address
-	local conn_ip = ip.new_ip(conn:ip());
-	for trusted_network in trusted_networks:items() do
-		if ip.match(trusted_network.ip, conn_ip, trusted_network.cidr) then
-			return true;
-		end
-	end
+    -- Iterate through all trusted proxies and check for match against connected IP address
+    local conn_ip = ip.new_ip(conn:ip());
+    for trusted_network in trusted_networks:items() do
+        if ip.match(trusted_network.ip, conn_ip, trusted_network.cidr) then
+            return true;
+        end
+    end
 
-	-- Connection does not match any trusted
-	return false;
+    -- Connection does not match any trusted
+    return false;
 end
 
 --- Component connlistener
@@ -455,38 +450,38 @@ function listener.onconnect(conn)
 
     local node = conn:ip();
 
-    	-- Client is using legacy SSL (otherwise mod_tls sets this flag)
-	if conn:ssl() then
+    -- Client is using legacy SSL (otherwise mod_tls sets this flag)
+    if conn:ssl() then
 
-		session.secure = true;
-		session.encrypted = true;
-        module:log("info", "Cluster SECURE SSL incoming node connection from" ..node);
+        session.secure = true;
+        session.encrypted = true;
+        module:log("info", "Cluster SECURE SSL incoming node connection from" .. node);
 
-		-- Check if TLS compression is used
-		local sock = conn:socket();
-		if sock.info then
-			session.compressed = sock:info"compression";
-		elseif sock.compression then
-			session.compressed = sock:compression(); --COMPAT mw/luasec-hg
-		end
-	else
-    
-        module:log("info", "Cluster UNSECURE incoming node connection from " ..node);
+        -- Check if TLS compression is used
+        local sock = conn:socket();
+        if sock.info then
+            session.compressed = sock:info "compression";
+        elseif sock.compression then
+            session.compressed = sock:compression(); -- COMPAT mw/luasec-hg
+        end
+    else
+
+        module:log("info", "Cluster UNSECURE incoming node connection from " .. node);
 
     end
 
-	-- if conn:ip() == nil then
-	-- 	conn:close();
-	-- 	return;
-	-- end
+    -- if conn:ip() == nil then
+    -- 	conn:close();
+    -- 	return;
+    -- end
 
     -- TODO: is_trusted_node()
-	-- Check if connection is coming from a trusted proxy
-	-- if not is_trusted_proxy(conn) then
-	-- 	conn:close();
-	-- 	module:log("warn", "Dropped connection from untrusted proxy: %s", conn:ip());
-	-- 	return;
-	-- end
+    -- Check if connection is coming from a trusted proxy
+    -- if not is_trusted_proxy(conn) then
+    -- 	conn:close();
+    -- 	module:log("warn", "Dropped connection from untrusted proxy: %s", conn:ip());
+    -- 	return;
+    -- end
 
     -- Logging functions --
     local conn_name = "ss" .. tostring(session):match("[a-f0-9]+$");
@@ -523,10 +518,10 @@ end
 function listener.onreadtimeout(conn)
 
     local session = sessions[conn];
-	if session then
-		session.send(" ");
-		return true;
-	end
+    if session then
+        session.send(" ");
+        return true;
+    end
 
 end
 
@@ -545,7 +540,7 @@ function listener.ondisconnect(conn, err)
         module:log("info", "Cluster client node disconnected: %s (%s)", tostring(node), tostring(err));
 
         if session.host then
-           clearRemoteSessions(session.host);
+            clearRemoteSessions(session.host);
         end
         if session.on_destroy then
             session:on_destroy(err);
@@ -569,11 +564,11 @@ module:provides("net", {
     name = "cluster",
     private = true,
     listener = listener,
-	-- encryption = "ssl";
-	-- ssl_config = {
-	-- 	verify = "none";
+    -- encryption = "ssl";
+    -- ssl_config = {
+    -- 	verify = "none";
     --     -- lua_ssl_verify_depth = 0;
-	-- };
+    -- };
     -- default_port = 7003,
     default_port = cluster_server_port,
     multiplex = {
