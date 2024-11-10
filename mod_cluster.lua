@@ -138,7 +138,7 @@ local function handle_room_event(event)
                             module:log("debug", "we are node "..node..", nothing to do");
                         else
                             module:log("debug", "target node for "..user_jid.." is "..node);
-                            fire_event("cluster/send", { node = node, host = host, stanza = event.stanza });
+                            --fire_event("cluster/send", { node = node, host = host, stanza = event.stanza });
                             clusters_enviar[node] = node;
                             enviar = true;
                         end

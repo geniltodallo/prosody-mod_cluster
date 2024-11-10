@@ -35,6 +35,7 @@ local stream_callbacks = {
 local xmlns_xmpp_streams = "urn:ietf:params:xml:ns:xmpp-streams";
 
 local remote_servers = module:get_option("cluster_servers", {});
+local remote_port = module:get_option("cluster_port", nil);
 local node_name = module:get_option("cluster_node_name", nil);
 
 if not prosody.cluster_users then
@@ -257,21 +258,25 @@ end
 
 function listener.ondisconnect(conn, err)
     local session = sessions[conn];
-
     if (session) then
-        module:log("info", "Cluster server node disconnected: %s (%s)", tostring(session.node), tostring(err));
-        clearRemoteSessions(session.node);
+	local node_ = session.node;
+        module:log("info", "Cluster server node disconnected: %s (%s)", tostring(node_), tostring(err));
+        clearRemoteSessions(node_);
         if session.on_destroy then
             session:on_destroy(err);
         end
         sessions[conn] = nil;
-        conns[session.node] = nil;
+        conns[node_] = nil;
         for k in pairs(session) do
             if k ~= "log" and k ~= "close" then
                 session[k] = nil;
             end
         end
         session.destroyed = true;
+    else 
+	local node_ = conn:ip();
+	module:log("debug", "On disconnect session null: %s" , node_);
+	conns[node_] = nil;
     end
 
     module:log("error", "connection lost");
@@ -285,6 +290,7 @@ end
 
 function listener.onreadtimeout(conn)
 
+    module:log("debug", "Listener onreadtimeout");
     local session = sessions[conn];
 	if session then
 		session.send(" ");
@@ -299,8 +305,11 @@ function connect(node_, port_)
     module:log("info", "Cluster connecting to node server: " .. node_);
 
     if not port_ then
-        port_ = 7473;
+        port_ = remote_port;
     end
+	
+	 module:log("info", "Cluster connecting to node server: " .. node_ .. " Port:" .. port_);
+	
     local conn = socket.tcp()
     conn:settimeout(10)
     local ok, err = conn:connect(node_, port_)
@@ -352,8 +361,11 @@ function handle_send(event)
         queue[node] = {};
     end
 
+    module:log("debug", "Tem conexao ativa:" .. node);
+
     local session = sessions[conn]
     if session == nil then
+	module:log("debug", "Handle send, session null");
         table.insert(queue[node], stanza)
     else
         conn:write(tostring(stanza));
@@ -409,7 +421,7 @@ function timerConnectRemote()
 
             end
         else
-
+	    module:log("debug", "Not reconnecting, node connected:" .. host_);
             -- node connected, send ping
             sendPing(host_);
             --conn:write(' ');
