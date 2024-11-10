@@ -16,19 +16,22 @@ Prosody configuration on cluster1:
 
 cluster_node_name = "sv01.yourcluster.com";
 cluster_servers = { "sv02.yourcluster.com:7473", "sv03.yourcluster.com:7473"};
-cluster_server_port = 7473;
+cluster_server_port = 7473; -- Local node port
+cluster_port = 7473; -- Remote node port
 
 Prosody configuration on cluster2:
 
 cluster_node_name = "sv02.yourcluster.com";
 cluster_servers = { "sv01.yourcluster.com:7473", "sv03.yourcluster.com:7473"};
-cluster_server_port = 7473;
+cluster_server_port = 7473; -- Local node port
+cluster_port = 7473; -- Remote node port
 
 Prosody configuration on cluster3:
 
 cluster_node_name = "sv03.yourcluster.com";
 cluster_servers = { "sv01.yourcluster.com:7473", "sv02.yourcluster.com:7473"};
-cluster_server_port = 7473;
+cluster_server_port = 7473; -- Local node port
+cluster_port = 7473; -- Remote node port
 
 Cenário utilizado: 
 Servidores mysql em replication master/master entre os nodes do prosody, usando o mesmo banco de dados.
