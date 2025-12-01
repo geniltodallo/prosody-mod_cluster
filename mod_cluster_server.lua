@@ -1,8 +1,6 @@
 -- Mod Cluster for Prosody
--- Copyright (C) 2023-2024 Genilto Dallo 
+-- Opensource 2023-2024 Genilto Dallo 
 -- GENILTO DALLO - 05/10/2023
---
--- This project is MIT/X11 licensed. Please see the
 --
 module:set_global();
 
@@ -53,6 +51,31 @@ local cluster_users = prosody.cluster_users;
 --	function (room_jid)
 --			return rooms[room_jid];
 -- end
+
+-- Importar biblioteca de bits no topo do arquivo
+local bit = require "bit";
+
+-- Função para calcular hash dos usuários locais
+local function calculateLocalUsersXORHash()
+    local hash_accumulator = 0;
+    local count = 0;
+    
+    for jid, user_sessions in pairs(bare_sessions) do
+        if user_sessions.sessions then
+            for key, session in pairs(user_sessions.sessions) do
+                -- Hash simples do JID
+                local jid_hash = 0;
+                for i = 1, #session.full_jid do
+                    jid_hash = jid_hash + session.full_jid:byte(i);
+                end
+                hash_accumulator = bit.bxor(hash_accumulator, jid_hash); -- XOR CORRETO
+                count = count + 1;
+            end
+        end
+    end
+    
+    return string.format("%x", hash_accumulator), count;
+end
 
 function stream_callbacks.error(session, error, data, data2)
     if session.destroyed then
@@ -301,15 +324,62 @@ local function handleClusterStanza(stanza)
 
         elseif stanza.attr.type == "probe" then
             if stanza.attr.node_from then
+                -- Limpar usuários antigos deste nó antes de enviar novos
+                --clearRemoteSessions(stanza.attr.node_from);
                 sendLocalSessions(stanza.attr.node_from);
             end
 
+        elseif stanza.attr.type == "hash_request" then
+            -- Nova funcionalidade: responder com hash dos usuários locais
+            local ourHash = stanza.attr.our_hash;
+            local ourCount = tonumber(stanza.attr.our_count) or 0;
+            
+            -- Calcular hash dos nossos usuários locais
+            local localHash, localCount = calculateLocalUsersXORHash();
+            
+            module:log("info", "Requisição de hash de %s: eles têm %s (%d), nós temos %s (%d)", 
+                      stanza.attr.node_from, ourHash, ourCount, localHash, localCount);
+            
+            -- Responder com nosso hash
+            local hashResponseStanza = st.stanza("cluster", {
+                xmlns = 'urn:xmpp:cluster'
+            });
+            hashResponseStanza.attr.type = "hash_response";
+            hashResponseStanza.attr.node_from = node_name;
+            hashResponseStanza.attr.node_to = stanza.attr.node_from;
+            hashResponseStanza.attr.remote_hash = localHash;
+            hashResponseStanza.attr.remote_count = localCount;
+            hashResponseStanza.attr.our_hash = ourHash;
+            hashResponseStanza.attr.our_count = ourCount;
+            
+            module:fire_event("cluster/send", {
+                node = stanza.attr.node_from,
+                host = stanza.attr.node_from,
+                stanza = hashResponseStanza
+            });
+
+        elseif stanza.attr.type == "hash_response" then
+            -- Processar resposta de hash
+            local remoteNode = stanza.attr.node_from;
+            local remoteHash = stanza.attr.remote_hash;
+            local remoteCount = tonumber(stanza.attr.remote_count) or 0;
+            local ourHash = stanza.attr.our_hash;
+            local ourCount = tonumber(stanza.attr.our_count) or 0;
+            
+            module:log("debug", "Recebida resposta de hash do nó %s", remoteNode);
+            
+            -- Disparar evento global para que o mod_cluster.lua processe
+            module:fire_event("cluster/hash_response", {
+                node = remoteNode,
+                remote_hash = remoteHash,
+                remote_count = remoteCount,
+                our_hash = ourHash,
+                our_count = ourCount
+            });
         end
 
         if stanza.attr.type == "get" and stanza:get_child("ping", "urn:xmpp:ping") then
-
             -- reply pong
-            -- <iq from='montague.lit' to='capulet.lit' id='s2s1' type='result'/>
             local pongStanza = st.stanza("cluster", {
                 xmlns = 'urn:xmpp:cluster'
             });
@@ -575,3 +645,5 @@ module:provides("net", {
         pattern = "^<.*:stream.*%sxmlns%s*=%s*(['\"])" .. xmlns_cluster .. "%1.*>"
     }
 });
+
+

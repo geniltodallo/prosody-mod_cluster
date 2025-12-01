@@ -1,5 +1,5 @@
 -- Mod Cluster for Prosody
--- Copyright (C) 2023-2024 Genilto Dallo 
+-- Opensource 2023-2025 Genilto Dallo 
 -- GENILTO DALLO - 05/10/2023
 --
 -- This project is MIT/X11 licensed. Please see the
@@ -155,12 +155,12 @@ local function handle_room_event(event)
                 end
             end
 
-            return false;
+            return nil;
         end
     end
 
     --fire_event("cluster/send", { node = rhost, stanza = event.stanza });
-    return false;
+    return nil;
 end
 
 -- Send carbon copy to remote node
@@ -388,6 +388,8 @@ local function handleUserConnected (event)
         fire_event("cluster/send", { node = host, host = host, stanza = userSessionStanza });
 
     end
+
+    return nil;
     
 end
 
@@ -410,6 +412,8 @@ local function handleUserDisconnected (event)
         fire_event("cluster/send", { node = host, host = host, stanza = userSessionStanza });
 
     end
+
+    return nil;
 
 end
 
@@ -493,3 +497,7 @@ module:log("debug", "hooked at %s", module:get_host());
 -- 0 "Read-only" stanza interception, for stanzas that are going to be delivered, e.g. for archiving. Do not modify or drop the stanza in priority 0 handlers.
 -- 1 - 999 For general processing modules that may modify or drop stanzas
 -- 1000+ Pre-processing filters, typically used to drop stanzas before they are seen by most modules.
+
+
+
+

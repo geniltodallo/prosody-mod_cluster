@@ -1,15 +1,13 @@
 -- Mod Cluster for Prosody
--- Copyright (C) 2023-2024 Genilto Dallo 
+-- Opensource 2023-2024 Genilto Dallo 
 -- GENILTO DALLO - 05/10/2023
---
--- This project is MIT/X11 licensed. Please see the
 --
 local socket = require "socket"
 local logger = require "util.logger";
 local sha1 = require"util.hashes".sha1;
 local st = require "util.stanza";
 local timer = require "util.timer";
-
+local bit = require "bit";
 local jid_split = require"util.jid".split;
 local new_xmpp_stream = require"util.xmppstream".new;
 local uuid_gen = require"util.uuid".generate;
@@ -43,7 +41,6 @@ if not prosody.cluster_users then
 end
 local cluster_users = prosody.cluster_users;
 
-
 module:set_global();
 
 function splitHostAndPort(inputstr)
@@ -53,7 +50,7 @@ end
 
 local function clearRemoteSessions(remoteServer)
 
-    module:log("info", "Cluster clear remote sessions from " ..remoteServer);
+    module:log("info", "Cluster clear remote sessions from " .. remoteServer);
 
     -- for jid, host in pairs(cluster_users) do
 
@@ -65,11 +62,11 @@ local function clearRemoteSessions(remoteServer)
     -- end
 
     for jid, user_nodes in pairs(cluster_users) do
-        
+
         for fulljid, host in pairs(user_nodes) do
 
             if host == remoteServer then
-                module:log("debug", "Clear remote session jid:" .. fulljid .. " from " ..remoteServer);
+                module:log("debug", "Clear remote session jid:" .. fulljid .. " from " .. remoteServer);
                 user_nodes[fulljid] = nil;
             end
 
@@ -164,6 +161,9 @@ end
 -- se conectou ao cluster remoto, requisitar usuarios, e enviar usuarios locais
 local function requisitarUsuariosRemotos(remoteHost)
 
+    -- limpa sessões remotas
+    clearRemoteSessions(remoteHost);
+
     -- probe for remote users
     userSessionStanza = st.stanza("cluster", {
         xmlns = 'urn:xmpp:cluster'
@@ -199,7 +199,7 @@ function listener.onconnect(conn)
 
     conn:setoption("keepalive", true);
 
-    module:log("info", "Cluster connected to " ..node);
+    module:log("info", "Cluster connected to " .. node);
 
     -- VERIFY CERT
     local sock = conn:socket();
@@ -208,10 +208,9 @@ function listener.onconnect(conn)
         (session.log or log)("info", "Stream encrypted (%s with %s)", info.protocol, info.cipher);
     end
     local cert
-	if conn.getpeercertificate then
-		cert = conn:getpeercertificate()
-	end
-
+    if conn.getpeercertificate then
+        cert = conn:getpeercertificate()
+    end
 
     local stream = new_xmpp_stream(session, stream_callbacks);
     session.stream = stream;
@@ -259,7 +258,7 @@ end
 function listener.ondisconnect(conn, err)
     local session = sessions[conn];
     if (session) then
-	local node_ = session.node;
+        local node_ = session.node;
         module:log("info", "Cluster server node disconnected: %s (%s)", tostring(node_), tostring(err));
         clearRemoteSessions(node_);
         if session.on_destroy then
@@ -273,10 +272,10 @@ function listener.ondisconnect(conn, err)
             end
         end
         session.destroyed = true;
-    else 
-	local node_ = conn:ip();
-	module:log("debug", "On disconnect session null: %s" , node_);
-	conns[node_] = nil;
+    else
+        local node_ = conn:ip();
+        module:log("debug", "On disconnect session null: %s", node_);
+        conns[node_] = nil;
     end
 
     module:log("error", "connection lost");
@@ -292,13 +291,12 @@ function listener.onreadtimeout(conn)
 
     module:log("debug", "Listener onreadtimeout");
     local session = sessions[conn];
-	if session then
-		session.send(" ");
-		return true;
-	end
+    if session then
+        session.send(" ");
+        return true;
+    end
 
 end
-
 
 function connect(node_, port_)
 
@@ -307,9 +305,9 @@ function connect(node_, port_)
     if not port_ then
         port_ = remote_port;
     end
-	
-	 module:log("info", "Cluster connecting to node server: " .. node_ .. " Port:" .. port_);
-	
+
+    module:log("info", "Cluster connecting to node server: " .. node_ .. " Port:" .. port_);
+
     local conn = socket.tcp()
     conn:settimeout(10)
     local ok, err = conn:connect(node_, port_)
@@ -365,10 +363,36 @@ function handle_send(event)
 
     local session = sessions[conn]
     if session == nil then
-	module:log("debug", "Handle send, session null");
+        module:log("debug", "Handle send, session null");
         table.insert(queue[node], stanza)
     else
         conn:write(tostring(stanza));
+    end
+end
+
+local function handleClusterStanza(stanza)
+    module:log("debug", "cluster_CLIENT handleClusterStanza: %s", tostring(stanza));
+
+    if stanza.name == "cluster" then
+        if stanza.attr.type == "hash_response" then
+            -- Processar resposta de hash
+            local remoteNode = stanza.attr.node_from;
+            local remoteHash = stanza.attr.remote_hash;
+            local remoteCount = tonumber(stanza.attr.remote_count) or 0;
+            local ourHash = stanza.attr.our_hash;
+            local ourCount = tonumber(stanza.attr.our_count) or 0;
+
+            module:log("debug", "Recebida resposta de hash do nó %s", remoteNode);
+
+            -- Disparar evento global para que o mod_cluster.lua processe
+            module:fire_event("cluster/hash_response", {
+                node = remoteNode,
+                remote_hash = remoteHash,
+                remote_count = remoteCount,
+                our_hash = ourHash,
+                our_count = ourCount
+            });
+        end
     end
 end
 
@@ -389,9 +413,9 @@ function sendPing(node)
     pingStanza:tag("ping", {
         xmlns = "urn:xmpp:ping"
     });
-	pingStanza.attr.id = uuid_gen();
+    pingStanza.attr.id = uuid_gen();
 
-	module:fire_event("cluster/send", {
+    module:fire_event("cluster/send", {
         node = node,
         host = node,
         stanza = pingStanza
@@ -410,7 +434,7 @@ function timerConnectRemote()
 
         local conn = conns[host_];
         if conn == nil then
-            module:log("debug", "connecting to node " .. host_.." port:"..port_);
+            module:log("debug", "connecting to node " .. host_ .. " port:" .. port_);
             local err;
             conn, err = connect(host_, port_);
             if not conn then
@@ -421,10 +445,10 @@ function timerConnectRemote()
 
             end
         else
-	    module:log("debug", "Not reconnecting, node connected:" .. host_);
+            module:log("debug", "Not reconnecting, node connected:" .. host_);
             -- node connected, send ping
             sendPing(host_);
-            --conn:write(' ');
+            -- conn:write(' ');
         end
 
     end
@@ -433,18 +457,154 @@ function timerConnectRemote()
 
 end
 
+--Calcula hash do array de usuarios remotos de um nó específico
+local function calculateRemoteNodeXORHash(target_node)
+    local hash_accumulator = 0;
+    local count = 0;
+    
+    for jid, user_nodes in pairs(cluster_users) do
+        for fulljid, node in pairs(user_nodes) do
+            if node == target_node then
+                -- Hash simples do JID completo
+                local jid_hash = 0;
+                for i = 1, #fulljid do
+                    jid_hash = jid_hash + fulljid:byte(i);
+                end
+                hash_accumulator = bit.bxor(hash_accumulator, jid_hash); -- XOR CORRETO
+                count = count + 1;
+            end
+        end
+    end
+    
+    return string.format("%x", hash_accumulator), count;
+end
+
+-- Função para calcular hash dos usuários locais
+local function calculateLocalUsersXORHash()
+    local hash_accumulator = 0;
+    local count = 0;
+    
+    for jid, user_sessions in pairs(bare_sessions) do
+        if user_sessions.sessions then
+            for key, session in pairs(user_sessions.sessions) do
+                -- Hash simples do JID
+                local jid_hash = 0;
+                for i = 1, #session.full_jid do
+                    jid_hash = jid_hash + session.full_jid:byte(i);
+                end
+                hash_accumulator = bit.bxor(hash_accumulator, jid_hash); -- XOR CORRETO
+                count = count + 1;
+            end
+        end
+    end
+    
+    return string.format("%x", hash_accumulator), count;
+end
+
+-- Funcao do timer para verificação de consistência com nós remotos
+function timerVerifyRemoteConsistency()
+    module:log("info", "Verificando consistência com nós remotos");
+
+    -- Para cada servidor remoto, requisitar hash dos usuários locais dele
+    for key, srv in pairs(remote_servers) do
+        local host, port = splitHostAndPort(srv);
+
+        -- Verificar se existe conexão ativa com este servidor
+        local has_connection = true;
+        local conn = conns[host];
+        if conn == nil then
+            has_connection = false;
+        end
+
+        if has_connection then
+            -- Calcular nosso hash local dos usuários que temos deste nó
+            local our_remote_hash, our_remote_count = calculateRemoteNodeXORHash(host);
+
+            module:log("info", "Solicitando hash remoto do nó %s (conectado - temos %d usuários, hash: %s)", host,
+                our_remote_count, our_remote_hash);
+
+            -- Criar stanza para requisitar hash remoto
+            local hashRequestStanza = st.stanza("cluster", {
+                xmlns = 'urn:xmpp:cluster'
+            });
+            hashRequestStanza.attr.type = "hash_request";
+            hashRequestStanza.attr.node_from = node_name;
+            hashRequestStanza.attr.node_to = host;
+            hashRequestStanza.attr.our_hash = our_remote_hash;
+            hashRequestStanza.attr.our_count = our_remote_count;
+
+            module:fire_event("cluster/send", {
+                node = host,
+                host = host,
+                stanza = hashRequestStanza
+            });
+        else
+            module:log("warn", "Nó %s não está conectado - pulando verificação de hash", host);
+
+            -- Opcional: limpar dados antigos deste nó se não está conectado há muito tempo
+            -- local nodes_info = {};
+            -- for jid, user_nodes in pairs(cluster_users) do
+            --     for fulljid, node in pairs(user_nodes) do
+            --         if node == host then
+            --             if not nodes_info[node] then
+            --                 nodes_info[node] = 0;
+            --             end
+            --             nodes_info[node] = nodes_info[node] + 1;
+            --         end
+            --     end
+            -- end
+
+            if has_connection[host] and cluster_users[host] > 0 then
+                module:log("warn", "Nó %s desconectado mas ainda temos %d usuários na lista local", host,
+                    cluster_users[host]);
+            end
+        end
+    end
+
+    return 600; -- 600 - 10 minutos
+end
+
 function handle_start(event)
 
     module:log("debug", "Module cluster_client server-started");
 
     -- Timer to verify remote connection -- 30 seconds
     timer.add_task(30, timerConnectRemote);
-
     -- Connect as soon as possible!
     timerConnectRemote();
 
+    -- Timer para verificar consistencia hash das listas de usuários
+    timer.add_task(600, timerVerifyRemoteConsistency);
+
+end
+
+-- Função para processar resposta de hash e decidir se precisa re-sincronizar
+local function handleHashResponse(event)
+    local remoteNode = event.node;
+    local remoteHash = event.remote_hash;
+    local remoteCount = event.remote_count;
+    local ourHash = event.our_hash;
+    local ourCount = event.our_count;
+    module:log("info", "Comparação de hash com nó %s:", remoteNode);
+    module:log("info", "  Remoto: %d usuários (hash: %s)", remoteCount, remoteHash);
+    module:log("info", "  Local:  %d usuários (hash: %s)", ourCount, ourHash);
+    
+    if remoteHash ~= ourHash or remoteCount ~= ourCount then
+        module:log("info", "Inconsistência detectada com nó %s! Re-sincronizando...", remoteNode);
+        
+        -- Limpar dados antigos deste nó
+        -- Solicitar lista atualizada
+        --TODO Melhorar resincronizacao - responder o probe com todos os users em vez de um por um
+        requisitarUsuariosRemotos(remoteNode);  
+        module:log("info", "Probe enviado para nó %s para re-sincronização", remoteNode);
+    else
+        module:log("info", "Hash consistente com o nó %s", remoteNode);
+    end
 end
 
 module:hook_global("cluster/send", handle_send, 1000);
+module:hook_global("cluster/hash_response", handleHashResponse);
 module:hook_global("server-started", handle_start);
 
+
+    
